@@ -1,0 +1,117 @@
+<project
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.mycompany</groupId>
+    <artifactId>localrepodeployer</artifactId>
+    <packaging>jar</packaging>
+    <version>1.0.0</version>
+
+    <properties>
+        <!-- This is where your artifacts are -->
+        <deploy.basefolder>~/.m2</deploy.basefolder>
+    </properties>
+
+    <build>
+        <plugins>
+
+            <plugin>
+                <groupId>org.codehaus.groovy.maven</groupId>
+                <artifactId>gmaven-plugin</artifactId>
+                <version>1.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>commons-io</groupId>
+                        <artifactId>commons-io</artifactId>
+                        <version>1.4</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>deploy-files</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>execute</goal>
+                        </goals>
+                        <configuration>
+                            <source>
+                            <![CDATA[
+// read components from plexus container
+def layout = session.lookup(
+    'org.apache.maven.artifact.repository.layout.ArtifactRepositoryLayout');
+def repoFactory = session.lookup(
+    'org.apache.maven.artifact.repository.ArtifactRepositoryFactory');
+def repository = repoFactory.createDeploymentArtifactRepository(
+    pom.distributionManagement.repository.id,
+    pom.distributionManagement.repository.url,
+    layout, true );
+def localRepository = session.localRepository;
+def helper =
+    session.lookup("org.apache.maven.project.MavenProjectHelper");
+def afm = session.lookup(
+    'org.apache.maven.artifact.handler.manager.ArtifactHandlerManager');
+def factory = new org.apache.maven.artifact.factory.DefaultArtifactFactory();
+factory.class.getDeclaredField("artifactHandlerManager").accessible = true;
+factory.artifactHandlerManager=afm;
+def deployer = session.lookup(
+    'org.apache.maven.artifact.deployer.ArtifactDeployer');
+// initialize properties
+def baseFolder = new File(pom.properties['deploy.basefolder']);
+// iterate over all files recursively
+baseFolder.eachFileRecurse{
+    if(it.isDirectory())return;
+ 
+    System.out.println "Deploying " + it.absolutePath
+    
+    // packaging = file.extension
+    def packaging = it.name.replaceAll( /.+\./ , '' );
+    
+    def relativePath = it.absolutePath.replace(baseFolder.absolutePath, '')
+	
+	System.out.println "Relative Path " + relativePath
+	//def relativePath = it.absolutePath
+    def matcher = (relativePath =~ /\\?(.*)\\(.+)\\(.+)\\(.+)*(.pom|.jar|.zip|.js|.war|.ear|.xml)$/)
+    
+    if (!matcher) return;
+    System.out.println "Processing " + it.absolutePath
+    def groupId = matcher[0][1].replace('\\', '.');
+    def artifactId = matcher[0][2]
+    def version = matcher[0][3]
+    def fileName = matcher[0][4]+matcher[0][5]
+    def classifier = fileName.substring(fileName.lastIndexOf('.') + 1)
+    
+    if (classifier.equals(""))
+        artifact = factory.createBuildArtifact(groupId, artifactId, version, packaging );
+    else
+        artifact = factory.createArtifactWithClassifier(groupId, artifactId, version, packaging, classifier);
+    def pomFilePath = baseFolder.absolutePath+ '/' + matcher[0][1] + '/' + artifactId + '/' + version + '/' + artifactId + '-' + version + '.pom'    
+    System.out.println "POM: " + pomFilePath
+    File pomFile = new File(pomFilePath)
+    
+    def metadata =
+        new org.apache.maven.project.artifact.ProjectArtifactMetadata(artifact, pomFile );
+    artifact.addMetadata( metadata );
+ 
+    // deploy file
+    deployer.deploy(it, artifact, repository, localRepository );
+}
+                                    ]]>
+                            </source>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- Modify below to point to your repository -->
+    <distributionManagement>
+        <repository>
+            <id>server</id>
+            <url>url</url>
+            <layout>default</layout>
+        </repository>
+    </distributionManagement>
+
+</project>
